@@ -119,7 +119,7 @@ for step, batch in enumerate(val_loader):
 
                 plt.figure()
                 f, axarr = plt.subplots(1, 10, figsize=(50, 50))
-                for i in range(10):
+                for i in range(min(10, len(intermediates))):
                     axarr[i].imshow(intermediates[i][0, 0, :, :, 90].cpu(), cmap="gray")
                 plt.show()
 
