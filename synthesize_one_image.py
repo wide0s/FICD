@@ -17,13 +17,6 @@ from torch.cuda.amp import autocast
 import matplotlib.pyplot as plt
 
 
-# Settings for reproducibility
-SEED = 0
-random.seed(SEED)
-np.random.seed(SEED)
-torch.manual_seed(SEED)
-
-
 def load_checkpoint(model, optimizer, load_path):
     checkpoint = torch.load(load_path)
     model.load_state_dict(checkpoint['model_state_dict'])
@@ -31,6 +24,16 @@ def load_checkpoint(model, optimizer, load_path):
     epoch = checkpoint['epoch']
 
     return model, optimizer, epoch
+
+
+def check_natural_int(value):
+    try:
+        v = int(value)
+        if v < 1:
+            raise ValueError('value < 1')
+        return v
+    except ValueError:
+         raise argparse.ArgumentTypeError(f"{value} is not a valid natural number")
 
 
 parser = argparse.ArgumentParser(
@@ -64,8 +67,21 @@ parser.add_argument(
      help='number of diffusion steps used when generating samples with a pre-trained model (default: 1000)'
 )
 
+parser.add_argument(
+     '--num-mc-samples',
+     type=check_natural_int,
+     default=5,
+     help='number of Monte-Carlo (MC) samples (default: 5, paper recommends 10)'
+)
+
 args = parser.parse_args()
 _VERBOSE = args.verbose
+
+num_mc_samples = args.num_mc_samples
+if num_mc_samples == 1:
+    print('Sets all seeds to 0 to ensure reproducibility')
+    random.seed(0)
+    np.random.seed(0)
 
 device = torch.device("cuda")
 model = DiffusionModelUNet(
@@ -119,58 +135,51 @@ load_path = f'checkpoints/{epoch_to_load}_checkpoint.pt'
 model, optimizer, epoch = load_checkpoint(model, optimizer, load_path)
 print('Checkpoint', load_path)
 
+predicted_images_data = []
+base_file_name = None
+
 num_inference_steps = args.num_inference_steps
 for step, batch in enumerate(val_loader):
-    for seed in range(10):
-        if seed == 0 and step == 0: # generate one output to show an example
-                SEED=seed
-                torch.manual_seed(SEED)
-                print('MRI subject ',batch["mri"]["path"])
-                condition = batch["mri"]["data"].to(device)
+    for seed in range(num_mc_samples):
+        print(f'\nGenerating diffusion sample {seed + 1} of {num_mc_samples}')
+        torch.manual_seed(seed)
+        print('MRI subject ',batch["mri"]["path"])
+        condition = batch["mri"]["data"].to(device)
 
-                input_noise = torch.randn((1, 1, 160, 180, 160))
-                input_noise = input_noise.to(device)
-                scheduler.set_timesteps(num_inference_steps=num_inference_steps)
-                with autocast(enabled=True):
-                    pred_PET, intermediates = inferer.sample(input_noise=input_noise,
-                                diffusion_model=model,
-                                scheduler=scheduler,
-                                save_intermediates=True,
-                                intermediate_steps=100,
-                                conditioning=torch.unsqueeze(condition[0,:,:,:,:], 0))
+        input_noise = torch.randn((1, 1, 160, 180, 160))
+        input_noise = input_noise.to(device)
+        scheduler.set_timesteps(num_inference_steps=num_inference_steps)
+        with autocast(enabled=True):
+            pred_PET, intermediates = inferer.sample(input_noise=input_noise,
+                        diffusion_model=model,
+                        scheduler=scheduler,
+                        save_intermediates=True,
+                        intermediate_steps=100,
+                        conditioning=torch.unsqueeze(condition[0,:,:,:,:], 0))
 
-                # print("Model output")
-                # plt.style.use("default")
-                # plotting_image_0 = np.concatenate([pred_PET[0, 0, :, :, 80].cpu(), np.flipud(pred_PET[0, 0, :, 90, :].cpu().T)], axis=1)
-                # plotting_image_1 = np.concatenate([np.flipud(pred_PET[0, 0, 90, :, :].cpu().T), np.zeros((160, 160))], axis=1)
-                # plt.imshow(np.concatenate([plotting_image_0, plotting_image_1], axis=0), cmap="gray")
-                # plt.tight_layout()
-                # plt.axis("off")
-                # plt.show()
+        if base_file_name is None:
+            base_file_name = str(batch["mri"]["stem"][0]) + '_' + str(epoch_to_load) \
+                + '_steps' + str(num_inference_steps)
 
-                # print("Input MRI")
-                # plt.style.use("default")
-                # plotting_image_0 = np.concatenate([condition[0, 0, :, :, 80].cpu(), np.flipud(condition[0, 0, :, 90, :].cpu().T)], axis=1)
-                # plotting_image_1 = np.concatenate([np.flipud(batch["mri"]["data"][0, 0, 90, :, :].cpu().T), np.zeros((160, 160))], axis=1)
-                # plt.imshow(np.concatenate([plotting_image_0, plotting_image_1], axis=0), cmap="gray")
-                # plt.tight_layout()
-                # plt.axis("off")
-                # plt.show()
+        torch.save(pred_PET, base_file_name + '_seed' + str(seed) + '.pt')
 
-                # plt.figure()
-                # f, axarr = plt.subplots(1, 10, figsize=(50, 50))
-                # for i in range(min(10, len(intermediates))):
-                #     axarr[i].imshow(intermediates[i][0, 0, :, :, 90].cpu(), cmap="gray")
-                # plt.show()
+        image_data = pred_PET.squeeze().cpu().numpy().astype("float32") # extract numpy
+        affine = np.eye(4) # affine matrix
+        pet_nii = nib.Nifti1Image(image_data, affine)
+        nii_file_name = base_file_name + '_seed' + str(seed) + '.nii.gz'
+        nib.save(pet_nii, nii_file_name)
 
-                base_file_name = str(batch["mri"]["stem"][0]) + '_' + str(epoch_to_load) + '_steps' + str(num_inference_steps) + '_seed' + str(SEED)
-                torch.save(pred_PET, base_file_name + '.pt')
+        if _VERBOSE:
+            print(f'Done with synthesis of sample {seed} -> {nii_file_name}')
 
-                image_data = pred_PET.squeeze().cpu().numpy().astype("float32") # extract numpy
-                affine = np.eye(4) # affine matrix
-                pet_nii = nib.Nifti1Image(image_data, affine)
-                nii_file_name = base_file_name + '.nii.gz'
-                nib.save(pet_nii, nii_file_name)
+        predicted_images_data.append(image_data)
 
-                if _VERBOSE:
-                     print(f'Done with synthesis -> {nii_file_name}')
+# averaging MC samples
+image_data = np.mean(np.stack(predicted_images_data, axis=0), axis=0)
+affine = np.eye(4)
+nii_file_name = base_file_name + '_averaged' + '.nii.gz'
+#nib.save(nib.Nifti1Image(image_data.astype(np.float32), affine), averaged_nii)
+nib.save(nib.Nifti1Image(image_data, affine), nii_file_name)
+
+if _VERBOSE:
+    print(f'Saved MC-averaged PET -> {nii_file_name}')
