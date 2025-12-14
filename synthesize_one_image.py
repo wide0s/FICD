@@ -170,7 +170,7 @@ for step, batch in enumerate(val_loader):
         nib.save(pet_nii, nii_file_name)
 
         if _VERBOSE:
-            print(f'Done with synthesis of sample {seed} -> {nii_file_name}')
+            print(f'Done with synthesis of sample {seed + 1} -> {nii_file_name}')
 
         predicted_images_data.append(image_data)
 
