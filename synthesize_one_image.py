@@ -113,18 +113,18 @@ model.to(device)
 if _VERBOSE:
     print(model)
 
-validation_transform = tio.Compose([
-    tio.RescaleIntensity(out_min_max=(0, 1)),      # [0; 1] for inference, [-1; 1] for training
-    tio.transforms.Crop([11, 10, 20, 17, 0, 21]),
-    tio.Resize((160, 180, 160))
-]) # TODO: check this
+#validation_transform = tio.Compose([
+#    tio.RescaleIntensity(out_min_max=(0, 1)),      # [0; 1] for inference, [-1; 1] for training
+#    tio.transforms.Crop([11, 10, 20, 17, 0, 21]),
+#    tio.Resize((160, 180, 160))
+#]) # TODO: check this
 
 MRI_path = args.input
 subject = tio.Subject(
      mri=tio.ScalarImage(MRI_path))
 
 validation_set = tio.SubjectsDataset(
-    [subject], transform=validation_transform)
+    [subject]) #, transform=validation_transform)
 
 val_loader = torch.utils.data.DataLoader(
     validation_set,
