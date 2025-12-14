@@ -135,11 +135,10 @@ load_path = f'checkpoints/{epoch_to_load}_checkpoint.pt'
 model, optimizer, epoch = load_checkpoint(model, optimizer, load_path)
 print('Checkpoint', load_path)
 
-predicted_images_data = []
-base_file_name = None
-
 num_inference_steps = args.num_inference_steps
 for step, batch in enumerate(val_loader):
+    predicted_images_data = []
+    base_file_name = None
     for seed in range(num_mc_samples):
         print(f'\nGenerating diffusion sample {seed + 1} of {num_mc_samples}')
         torch.manual_seed(seed)
@@ -158,15 +157,14 @@ for step, batch in enumerate(val_loader):
                         conditioning=torch.unsqueeze(condition[0,:,:,:,:], 0))
 
         if base_file_name is None:
-            base_file_name = str(batch["mri"]["stem"][0]) + '_' + str(epoch_to_load) \
-                + '_steps' + str(num_inference_steps)
+            base_file_name = f'{batch["mri"]["stem"][0]}_{epoch_to_load}_steps{num_inference_steps}'
 
-        torch.save(pred_PET, base_file_name + '_seed' + str(seed) + '.pt')
+        torch.save(pred_PET, f'{base_file_name}_seed{seed}.pt')
 
         image_data = pred_PET.squeeze().cpu().numpy().astype("float32") # extract numpy
         affine = np.eye(4) # affine matrix
         pet_nii = nib.Nifti1Image(image_data, affine)
-        nii_file_name = base_file_name + '_seed' + str(seed) + '.nii.gz'
+        nii_file_name = f'{base_file_name}_seed{seed}.nii.gz'
         nib.save(pet_nii, nii_file_name)
 
         if _VERBOSE:
@@ -174,12 +172,13 @@ for step, batch in enumerate(val_loader):
 
         predicted_images_data.append(image_data)
 
-# averaging MC samples
-image_data = np.mean(np.stack(predicted_images_data, axis=0), axis=0)
-affine = np.eye(4)
-nii_file_name = base_file_name + '_averaged' + '.nii.gz'
-#nib.save(nib.Nifti1Image(image_data.astype(np.float32), affine), averaged_nii)
-nib.save(nib.Nifti1Image(image_data, affine), nii_file_name)
+    # averaging of synthesized PET samples for the current MRI
+    image_data = np.mean(
+        np.stack(predicted_images_data, axis=0),
+        axis=0)
+    affine = np.eye(4)
+    nii_file_name = f'{base_file_name}_averaged.nii.gz'
+    nib.save(nib.Nifti1Image(image_data, affine), nii_file_name)
 
 if _VERBOSE:
     print(f'Saved MC-averaged PET -> {nii_file_name}')
