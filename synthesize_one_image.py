@@ -36,6 +36,16 @@ def check_natural_int(value):
          raise argparse.ArgumentTypeError(f"{value} is not a valid natural number")
 
 
+def check_ge_0_int(value):
+    try:
+        v = int(value)
+        if v < 0:
+            raise ValueError('value < 0')
+        return v
+    except ValueError:
+         raise argparse.ArgumentTypeError(f"{value} is less than 0")
+
+
 parser = argparse.ArgumentParser(
      description="Run inference with PyTorch's FICD model on an MRI 3D brain image."
 )
@@ -62,7 +72,7 @@ parser.add_argument(
 
 parser.add_argument(
      '--num-inference-steps',
-     type=int,
+     type=check_natural_int,
      default=1000,
      help='number of diffusion steps used when generating samples with a pre-trained model (default: 1000)'
 )
@@ -71,17 +81,18 @@ parser.add_argument(
      '--num-mc-samples',
      type=check_natural_int,
      default=5,
-     help='number of Monte-Carlo (MC) samples (default: 5, paper recommends 10)'
+     help='number of Monte-Carlo (MC) samples (default: 5; article recommends 10)'
+)
+
+parser.add_argument(
+    '-s', '--seed',
+    type=check_ge_0_int,
+    default=0,
+    help='each MC samples will be synthesized with a seed value = SEED + sample number (default: 0).'
 )
 
 args = parser.parse_args()
 _VERBOSE = args.verbose
-
-num_mc_samples = args.num_mc_samples
-if num_mc_samples == 1:
-    print('Sets all seeds to 0 to ensure reproducibility')
-    random.seed(0)
-    np.random.seed(0)
 
 device = torch.device("cuda")
 model = DiffusionModelUNet(
@@ -101,7 +112,6 @@ model.to(device)
 
 if _VERBOSE:
     print(model)
-
 
 validation_transform = tio.Compose([
     tio.RescaleIntensity(out_min_max=(-1, 1)),
@@ -135,13 +145,21 @@ load_path = f'checkpoints/{epoch_to_load}_checkpoint.pt'
 model, optimizer, epoch = load_checkpoint(model, optimizer, load_path)
 print('Checkpoint', load_path)
 
+num_mc_samples = args.num_mc_samples
 num_inference_steps = args.num_inference_steps
 for step, batch in enumerate(val_loader):
     predicted_images_data = []
     base_file_name = None
-    for seed in range(num_mc_samples):
-        print(f'\nGenerating diffusion sample {seed + 1} of {num_mc_samples}')
-        torch.manual_seed(seed)
+    for sample in range(1, num_mc_samples + 1):
+        print(f'\nGenerating diffusion sample {sample} of {num_mc_samples}')
+
+        SEED = args.seed + sample - 1
+        if _VERBOSE:
+            print(f'Set seeds to {SEED} to ensure reproducibility')
+        random.seed(SEED)
+        np.random.seed(SEED)
+        torch.manual_seed(SEED) # seeds the RNG for all devices (both CPU and CUDA)
+
         print('MRI subject ',batch["mri"]["path"])
         condition = batch["mri"]["data"].to(device)
 
@@ -157,18 +175,21 @@ for step, batch in enumerate(val_loader):
                         conditioning=torch.unsqueeze(condition[0,:,:,:,:], 0))
 
         if base_file_name is None:
-            base_file_name = f'{batch["mri"]["stem"][0]}_{epoch_to_load}_steps{num_inference_steps}'
+            base_file_name = (
+                f'{batch["mri"]["stem"][0]}_{epoch_to_load}'
+                f'_steps{num_inference_steps}'
+            )
 
-        torch.save(pred_PET, f'{base_file_name}_seed{seed}.pt')
+        torch.save(pred_PET, f'{base_file_name}_seed{SEED}_sample{sample}.pt')
 
         image_data = pred_PET.squeeze().cpu().numpy().astype("float32") # extract numpy
         affine = np.eye(4) # affine matrix
         pet_nii = nib.Nifti1Image(image_data, affine)
-        nii_file_name = f'{base_file_name}_seed{seed}.nii.gz'
+        nii_file_name = f'{base_file_name}_seed{SEED}_sample{sample}.nii.gz'
         nib.save(pet_nii, nii_file_name)
 
         if _VERBOSE:
-            print(f'Done with synthesis of sample {seed + 1} -> {nii_file_name}')
+            print(f'Done with synthesis of sample {sample} -> {nii_file_name}')
 
         predicted_images_data.append(image_data)
 
@@ -181,4 +202,4 @@ for step, batch in enumerate(val_loader):
     nib.save(nib.Nifti1Image(image_data, affine), nii_file_name)
 
 if _VERBOSE:
-    print(f'Saved MC-averaged PET -> {nii_file_name}')
+    print(f'\nSaved MC-averaged PET -> {nii_file_name}')
