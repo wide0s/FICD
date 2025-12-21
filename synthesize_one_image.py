@@ -122,14 +122,15 @@ if _VERBOSE:
 MRI_path = args.input
 subject = tio.Subject(
      mri=tio.ScalarImage(MRI_path))
+subjects_list = [subject]
 
 validation_set = tio.SubjectsDataset(
-    [subject]) #, transform=validation_transform)
+    subjects_list) #, transform=validation_transform)
 
 val_loader = torch.utils.data.DataLoader(
     validation_set,
     batch_size=1,
-    num_workers=multiprocessing.cpu_count(),
+    num_workers=0
 )
 
 scheduler = DDPMScheduler(num_train_timesteps=1000,
@@ -163,16 +164,18 @@ for step, batch in enumerate(val_loader):
         print('MRI subject ',batch["mri"]["path"])
         condition = batch["mri"]["data"].to(device)
 
-        input_noise = torch.randn((1, 1, 160, 180, 160))
-        input_noise = input_noise.to(device)
+        input_noise = torch.randn((1, 1, 160, 180, 160),
+                                  device=device) # generates noise on GPU
         scheduler.set_timesteps(num_inference_steps=num_inference_steps)
-        with autocast(enabled=True):
-            pred_PET, intermediates = inferer.sample(input_noise=input_noise,
-                        diffusion_model=model,
-                        scheduler=scheduler,
-                        save_intermediates=True,
-                        intermediate_steps=100,
-                        conditioning=torch.unsqueeze(condition[0,:,:,:,:], 0))
+        with torch.inference_mode(): # disables grads computation, which are not used for inference
+            with autocast(enabled=True):
+                pred_PET = inferer.sample(input_noise=input_noise,
+                                          diffusion_model=model,
+                                          scheduler=scheduler,
+                                          save_intermediates=False, # disables the generation of
+                                                                    # intermediate images
+                                          intermediate_steps=None,
+                                          conditioning=torch.unsqueeze(condition[0,:,:,:,:], 0))
 
         if base_file_name is None:
             base_file_name = (
