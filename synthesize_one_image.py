@@ -85,6 +85,12 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    '--dont-average',
+    action='store_true',
+    help='do not average the MC samples and therefore do not generate an average image (default: False)'
+)
+
+parser.add_argument(
     '-s', '--seed',
     type=check_ge_0_int,
     default=0,
@@ -149,7 +155,7 @@ print('Checkpoint', load_path)
 num_mc_samples = args.num_mc_samples
 num_inference_steps = args.num_inference_steps
 for step, batch in enumerate(val_loader):
-    predicted_images_data = []
+    average_images_data = []
     base_file_name = None
     for sample in range(1, num_mc_samples + 1):
         print(f'\nGenerating diffusion sample {sample} of {num_mc_samples}')
@@ -191,18 +197,20 @@ for step, batch in enumerate(val_loader):
         nii_file_name = f'{base_file_name}_seed{SEED}_sample{sample}.nii.gz'
         nib.save(pet_nii, nii_file_name)
 
+        if not args.dont_average:
+            average_images_data.append(image_data)
+
         if _VERBOSE:
             print(f'Done with synthesis of sample {sample} -> {nii_file_name}')
 
-        predicted_images_data.append(image_data)
-
     # averaging of synthesized PET samples for the current MRI
-    image_data = np.mean(
-        np.stack(predicted_images_data, axis=0),
-        axis=0)
-    affine = np.eye(4)
-    nii_file_name = f'{base_file_name}_averaged.nii.gz'
-    nib.save(nib.Nifti1Image(image_data, affine), nii_file_name)
+    if len(average_images_data) > 0:
+        image_data = np.mean(
+            np.stack(average_images_data, axis=0),
+            axis=0)
+        affine = np.eye(4)
+        nii_file_name = f'{base_file_name}_averaged.nii.gz'
+        nib.save(nib.Nifti1Image(image_data, affine), nii_file_name)
 
-if _VERBOSE:
-    print(f'\nSaved MC-averaged PET -> {nii_file_name}')
+        if _VERBOSE:
+            print(f'\nSaved MC-averaged PET -> {nii_file_name}')
