@@ -81,20 +81,20 @@ parser.add_argument(
      '--num-mc-samples',
      type=check_natural_int,
      default=5,
-     help='number of Monte-Carlo (MC) samples (default: 5; article recommends 10)'
+     help='number of Monte-Carlo (MC) samples (default: 5; article mentions 10)'
 )
 
 parser.add_argument(
     '--dont-average',
     action='store_true',
-    help='do not average the MC samples and therefore do not generate an average image (default: False)'
+    help='do not average the MC samples and therefore do not generate an average PET image (default: False)'
 )
 
 parser.add_argument(
     '-s', '--seed',
     type=check_ge_0_int,
     default=0,
-    help='each MC samples will be synthesized with a seed value = SEED + sample number (default: 0).'
+    help='each MC samples will be synthesized with a seed value = SEED + sample number (starting from 0 - default).'
 )
 
 args = parser.parse_args()
