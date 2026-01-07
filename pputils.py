@@ -1,11 +1,17 @@
 import argparse
-from typing import Any
+from pathlib import Path
+import os
+import shutil
 
 import torch
 import torch.nn as nn
 
 import nibabel as nib
 import numpy as np
+
+
+class CommandException(Exception):
+    pass
 
 
 def pt2nii(args: argparse.Namespace):
@@ -34,7 +40,31 @@ def pt2nii(args: argparse.Namespace):
     pet_nii = nib.Nifti1Image(arr, affine)
     nib.save(pet_nii, output)
 
-    print(f"Saved: {output}")
+    print(f"Saved as {output}")
+
+
+def dcm2nii(args: argparse.Namespace):
+    if not shutil.which("dcm2niix"):
+        raise CommandException("The dcm2niix utility was not found. Try installing it " \
+                                "as: sudo apt install -y pygz dcm2niix.")
+    if not args.directory.is_dir():
+        raise ValueError(f"The path '{args.directory}' does not exist or is not a directory.")
+    output_dir = input_dir = args.directory.resolve()
+    if args.output:
+        if args.output.exists() and not args.output.is_dir():
+            raise CommandException(f"The '{args.output}' exists and is not a directory.")
+        elif not args.output.exists():
+            os.makedirs(args.output)
+        output_dir = args.output.resolve()
+    cmd = (
+        f"dcm2niix -t y -z y -o {output_dir} {input_dir}"
+    )
+    if args.verbose:
+        print(cmd)
+    return_code = os.system(cmd)
+    if return_code != 0:
+        raise CommandException(f"Error converting to NIfTI format: {return_code}.")
+    print(f"Saved in {output_dir}")
 
 
 def load_tensor(filename: str) -> torch.Tensor:
@@ -42,14 +72,14 @@ def load_tensor(filename: str) -> torch.Tensor:
         data = torch.load(filename) # loads an arbitrary Python object saved
                                     # with torch.save()
         if not isinstance(data, torch.Tensor):
-            raise ValueError(f"The file {filename} does not contain a tensor.")
+            raise ValueError(f"The file '{filename}' does not contain a tensor.")
         return data
     if filename.endswith("nii.gz"):
         image_data = nib.load(filename)
         numpy_array = image_data.get_fdata().astype(np.float32) # ensure data is float32,
                                                                 # which is standard for PyTorch
         return torch.from_numpy(numpy_array)
-    raise ValueError(f"The file {filename} has unknown format. It must be .pt or .nii.gz.")
+    raise ValueError(f"The file '{filename}' has unknown format. It must be .pt or .nii.gz.")
 
 
 def MAE(args: argparse.Namespace):
@@ -69,7 +99,7 @@ def MAE(args: argparse.Namespace):
 
 
 parser = argparse.ArgumentParser(
-    description="The post-processing utilitites for pt and NIfTI files."
+    description="The post-processing utilitites for pt, DICOM and NIfTI files."
 )
 
 parser.add_argument(
@@ -101,6 +131,23 @@ pt2nii_parser.add_argument(
     help="The output file name (default: output.nii.gz)."
 )
 pt2nii_parser.set_defaults(func=pt2nii)
+
+# --- dcm2nii commands ---
+dcm2nii_parser = subparsers.add_parser(
+    "dcm2nii",
+    help="Converts image in DICOM format to NIfTI."
+)
+dcm2nii_parser.add_argument(
+    "directory",
+    type=Path,
+    help="The path to the input directory with DCM files."
+)
+dcm2nii_parser.add_argument(
+    "-o", "--output",
+    type=Path,
+    help="The output directory (omit to save to input directory)."
+)
+dcm2nii_parser.set_defaults(func=dcm2nii)
 
 # --- mae commands ---
 mae_parser = subparsers.add_parser(
