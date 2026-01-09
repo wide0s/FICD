@@ -1,7 +1,6 @@
 import argparse
 from pathlib import Path
 import os
-import shutil
 
 import torch
 import torch.nn as nn
@@ -44,9 +43,6 @@ def pt2nii(args: argparse.Namespace):
 
 
 def dcm2nii(args: argparse.Namespace):
-    if not shutil.which("dcm2niix"):
-        raise CommandException("The dcm2niix utility was not found. Try installing it " \
-                                "as: sudo apt install -y pygz dcm2niix.")
     if not args.directory.is_dir():
         raise ValueError(f"The path '{args.directory}' does not exist or is not a directory.")
     output_dir = input_dir = args.directory.resolve()
@@ -56,8 +52,9 @@ def dcm2nii(args: argparse.Namespace):
         elif not args.output.exists():
             os.makedirs(args.output)
         output_dir = args.output.resolve()
+    wrm = args.write_mode
     cmd = (
-        f"dcm2niix -t y -z y -o {output_dir} {input_dir}"
+        f"dcm2niix -w {wrm} -t y -z y -f %f_%d_subj_%i_ts_%t -o {output_dir} {input_dir}"
     )
     if args.verbose:
         print(cmd)
@@ -146,6 +143,13 @@ dcm2nii_parser.add_argument(
     "-o", "--output",
     type=Path,
     help="The output directory (omit to save to input directory)."
+)
+dcm2nii_parser.add_argument(
+    "--write-mode",
+    choices=[0, 1, 2],
+    default=0,
+    type=int,
+    help="Write behavior for name conflicts (default 0: 0=skip duplicates, 1=overwrite, 2=add suffix)."
 )
 dcm2nii_parser.set_defaults(func=dcm2nii)
 
