@@ -54,7 +54,7 @@ def dcm2nii(args: argparse.Namespace):
         output_dir = args.output.resolve()
     wrm = args.write_mode
     cmd = (
-        f"dcm2niix -w {wrm} -t y -z y -f %f_%d_subj_%i_ts_%t -o {output_dir} {input_dir}"
+        f"dcm2niix -w {wrm} -t y -z y -f %f_%p_subj_%i_tm_%t_%s -o {output_dir} {input_dir}"
     )
     if args.verbose:
         print(cmd)
