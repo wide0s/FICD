@@ -13,6 +13,32 @@ class CommandException(Exception):
     pass
 
 
+def load_tensor(filename: str | Path, filters=["pt", "nii.gz"]) -> torch.Tensor:
+    if isinstance(filename, Path):
+        filename = str(filename)
+    if isinstance(filters, str):
+        filters = [filters]
+    elif not isinstance(filters, list):
+        raise ValueError("The filters must be a list or a string.")
+    if "pt" in filters and filename.endswith("pt"):
+        tensor = torch.load(filename)
+        if not isinstance(tensor, torch.Tensor):
+            raise ValueError(f"The file '{filename}' does not contain a tensor.")
+        if tensor.dtype != torch.float32:
+            print(f"Warning: Tensor in {filename} has dtype {tensor.dtype}," \
+                  " convert it to torch.float32.")
+            tensor = tensor.to(dtype=torch.float32)
+        return tensor
+    if "nii.gz" in filters and filename.endswith("nii.gz"):
+        image_data = nib.load(filename)
+        numpy_array = image_data.get_fdata().astype(np.float32) # get_fdata() returns ndarray as np.float64;
+                                                                # ensure data is float32, which is standard
+                                                                # for PyTorch
+        return torch.from_numpy(numpy_array)
+    raise ValueError(f"The file '{filename}' has unknown format. The supported formats are " \
+                     f"{filters}")
+
+
 def pt2nii(args: argparse.Namespace) -> None:
     if not args.filename.endswith("pt"):
         raise ValueError(f"The input filename must ends with pt")
@@ -64,24 +90,6 @@ def dcm2nii(args: argparse.Namespace) -> None:
     print(f"Saved in {output_dir}")
 
 
-def load_tensor(filename: str | Path) -> torch.Tensor:
-    if isinstance(filename, Path):
-        filename = str(filename)
-    if filename.endswith("pt"):
-        data = torch.load(filename) # loads an arbitrary Python object saved
-                                    # with torch.save()
-        if not isinstance(data, torch.Tensor):
-            raise ValueError(f"The file '{filename}' does not contain a tensor.")
-        # TODO: should not tensor's elements be converted to np.float32 before returing?
-        return data
-    if filename.endswith("nii.gz"):
-        image_data = nib.load(filename)
-        numpy_array = image_data.get_fdata().astype(np.float32) # ensure data is float32,
-                                                                # which is standard for PyTorch
-        return torch.from_numpy(numpy_array)
-    raise ValueError(f"The file '{filename}' has unknown format. It must be .pt or .nii.gz.")
-
-
 def MAE(args: argparse.Namespace) -> None:
     if args.verbose:
         print(f"device: {args.device}")
@@ -114,7 +122,7 @@ def mean_nii(args: argparse.Namespace) -> None:
                 raise ValueError(f"The {path} has different dimensions than the first image." \
                                  " Images must have the same dimensions to calculate the mean.")
             if not np.array_equal(affine, image.affine):
-                print("Warning:s Affine transforms differ. The output image will use the first" \
+                print("Warning: Affine transforms differ. The output image will use the first" \
                       " image's transform.")
         arrays.append(
             image.get_fdata().astype(np.float32)
@@ -128,7 +136,7 @@ def mean_nii(args: argparse.Namespace) -> None:
 
 
 parser = argparse.ArgumentParser(
-    description="The post-processing utilitites for pt, DICOM and NIfTI files."
+    description="The processing utilitites for pt, DICOM and NIfTI files."
 )
 
 parser.add_argument(
