@@ -13,7 +13,7 @@ class CommandException(Exception):
     pass
 
 
-def pt2nii(args: argparse.Namespace):
+def pt2nii(args: argparse.Namespace) -> None:
     if not args.filename.endswith("pt"):
         raise ValueError(f"The input filename must ends with pt")
 
@@ -42,7 +42,7 @@ def pt2nii(args: argparse.Namespace):
     print(f"Saved as {output}")
 
 
-def dcm2nii(args: argparse.Namespace):
+def dcm2nii(args: argparse.Namespace) -> None:
     if not args.directory.is_dir():
         raise ValueError(f"The path '{args.directory}' does not exist or is not a directory.")
     output_dir = input_dir = args.directory.resolve()
@@ -64,12 +64,15 @@ def dcm2nii(args: argparse.Namespace):
     print(f"Saved in {output_dir}")
 
 
-def load_tensor(filename: str) -> torch.Tensor:
+def load_tensor(filename: str | Path) -> torch.Tensor:
+    if isinstance(filename, Path):
+        filename = str(filename)
     if filename.endswith("pt"):
         data = torch.load(filename) # loads an arbitrary Python object saved
                                     # with torch.save()
         if not isinstance(data, torch.Tensor):
             raise ValueError(f"The file '{filename}' does not contain a tensor.")
+        # TODO: should not tensor's elements be converted to np.float32 before returing?
         return data
     if filename.endswith("nii.gz"):
         image_data = nib.load(filename)
@@ -79,7 +82,7 @@ def load_tensor(filename: str) -> torch.Tensor:
     raise ValueError(f"The file '{filename}' has unknown format. It must be .pt or .nii.gz.")
 
 
-def MAE(args: argparse.Namespace):
+def MAE(args: argparse.Namespace) -> None:
     if args.verbose:
         print(f"device: {args.device}")
     device = torch.device(args.device)
@@ -93,6 +96,35 @@ def MAE(args: argparse.Namespace):
     criterion_mae = nn.L1Loss(reduction="mean")
     mae_loss = criterion_mae(*tensors)
     print(f"MAE loss: {mae_loss.item()}")
+
+
+def mean_nii(args: argparse.Namespace) -> None:
+    arrays, shape, affine, header = \
+        [], None, None, None
+    for path in args.input:
+        if not path.is_file():
+            raise ValueError(f"The file '{path}' does not exist or is not a file.")
+        image = nib.load(path)
+        if len(arrays) == 0:
+            affine, header, shape = \
+                image.affine, image.header, image.shape
+            print(f"Using header and affine transform from {path}.")
+        else:
+            if shape != image.shape:
+                raise ValueError(f"The {path} has different dimensions than the first image." \
+                                 " Images must have the same dimensions to calculate the mean.")
+            if not np.array_equal(affine, image.affine):
+                print("Warning:s Affine transforms differ. The output image will use the first" \
+                      " image's transform.")
+        arrays.append(
+            image.get_fdata().astype(np.float32)
+        )
+    mean_array = sum(arrays) / len(arrays) # TODO: test me
+    nib.save(
+        nib.Nifti1Image(mean_array, affine, header),
+        args.output
+    )
+    print(f"Saved in {args.output}")
 
 
 parser = argparse.ArgumentParser(
@@ -115,6 +147,7 @@ subparsers = parser.add_subparsers(
 # --- pt2nii commands ----
 pt2nii_parser = subparsers.add_parser(
     "pt2nii",
+    description="Converts image in PyTorch\'s pt file to NIfTI.",
     help="Converts image in PyTorch\'s pt file to NIfTI."
 )
 pt2nii_parser.add_argument(
@@ -132,6 +165,7 @@ pt2nii_parser.set_defaults(func=pt2nii)
 # --- dcm2nii commands ---
 dcm2nii_parser = subparsers.add_parser(
     "dcm2nii",
+    description="Converts image in DICOM format to NIfTI.",
     help="Converts image in DICOM format to NIfTI."
 )
 dcm2nii_parser.add_argument(
@@ -156,6 +190,7 @@ dcm2nii_parser.set_defaults(func=dcm2nii)
 # --- mae commands ---
 mae_parser = subparsers.add_parser(
     "mae",
+    description="Calculates the Mean Absolute Error (MAE).",
     help="Calculates the Mean Absolute Error (MAE)."
 )
 mae_parser.add_argument(
@@ -172,9 +207,31 @@ mae_parser.add_argument(
     "--device",
     choices=["cpu", "cuda"],
     default="cpu",
+    type=str,
     help="device type (default: cpu)."
 )
 mae_parser.set_defaults(func=MAE)
+
+# --- mean NIfTI commands ---
+mean_nii_parser = subparsers.add_parser(
+    "mean_nii",
+    description="Creates a voxel-wise mean image from a list of NIfTI images.",
+    help="Creates a voxel-wise mean image from a list of NIfTI images."
+)
+mean_nii_parser.add_argument(
+    "-i", "--input",
+    action="append",
+    type=Path,
+    required=True,
+    help="(multiple) NIfTI images."
+)
+mean_nii_parser.add_argument(
+    "-o", "--output",
+    type=Path,
+    default="mean.nii.gz",
+    help="The path to the output NIfTI file (default: mean.nii.gz)."
+)
+mean_nii_parser.set_defaults(func=mean_nii)
 
 args = parser.parse_args()
 args.func(args)
