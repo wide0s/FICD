@@ -35,27 +35,17 @@ def load_tensor(filename: str | Path, filters=["pt", "nii.gz"]) -> torch.Tensor:
                                                                 # ensure data is float32, which is standard
                                                                 # for PyTorch
         return torch.from_numpy(numpy_array)
-    raise ValueError(f"The file '{filename}' has unknown format. The supported formats are " \
-                     f"{filters}")
+    raise ValueError(f"The file '{filename}' is in an unsupported format. The supported formats are " \
+                     f"{filters}.")
 
 
 def pt2nii(args: argparse.Namespace) -> None:
-    if not args.filename.endswith("pt"):
-        raise ValueError(f"The input filename must ends with pt")
-
     output = args.output if args.output else "output.nii.gz"
     if not output.endswith("nii.gz"):
         raise ValueError(f"The output filename must ends with nii.gz")
 
-    tensor = torch.load(args.filename)
-
-    if isinstance(tensor, torch.Tensor):
-        arr = tensor.squeeze().cpu().numpy().astype("float32")
-    elif isinstance(tensor, dict):
-        # if saved as dict
-        arr = tensor["pred"].squeeze().cpu().numpy().astype("float32")
-    else:
-        raise ValueError("Unknown .pt format")
+    tensor = load_tensor(args.filename, "pt")
+    arr = tensor.squeeze().cpu().numpy() # TODO: why squeeze()?
 
     # Affine matrix
     # Replace with real affine if you saved it earlier
@@ -132,7 +122,7 @@ def mean_nii(args: argparse.Namespace) -> None:
         nib.Nifti1Image(mean_array, affine, header),
         args.output
     )
-    print(f"Saved in {args.output}")
+    print(f"Saved as {args.output}")
 
 
 parser = argparse.ArgumentParser(
